@@ -1,0 +1,318 @@
+openapi: 3.1.0
+info:
+  title: Court Notification Engine API
+  version: 0.1.0
+  description: >
+    API for scheduling, sending, escalating, and tracking court notifications
+    across SMS, email, push, and in-app channels.
+  contact:
+    name: Justice OS Team
+    url: https://github.com/justice-os/court-notification-engine
+
+servers:
+  - url: https://api.justice-os.org/notifications/v1
+    description: Production
+  - url: http://localhost:3000/v1
+    description: Local development
+
+paths:
+  /notifications/send:
+    post:
+      summary: Send a notification
+      description: Send a notification immediately via the specified channel.
+      operationId: sendNotification
+      tags: [Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendNotificationInput'
+      responses:
+        '200':
+          description: Notification sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResult'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /notifications/schedule:
+    post:
+      summary: Schedule a notification
+      description: Schedule a notification for future delivery.
+      operationId: scheduleNotification
+      tags: [Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/SendNotificationInput'
+                - type: object
+                  required: [scheduledFor]
+                  properties:
+                    scheduledFor:
+                      type: string
+                      format: date-time
+                      description: When to send the notification
+      responses:
+        '201':
+          description: Notification scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduledNotification'
+        '400':
+          description: Invalid schedule time
+
+    get:
+      summary: List upcoming scheduled notifications
+      operationId: getUpcoming
+      tags: [Notifications]
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of upcoming notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScheduledNotification'
+
+  /notifications/escalate:
+    post:
+      summary: Create an escalation chain
+      description: Set up an escalation chain for unacknowledged notifications.
+      operationId: createEscalation
+      tags: [Escalation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalationChainInput'
+      responses:
+        '201':
+          description: Escalation chain created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalationChain'
+
+  /delivery/status:
+    get:
+      summary: Get delivery status
+      description: Check the delivery status of a sent notification.
+      operationId: getDeliveryStatus
+      tags: [Delivery]
+      parameters:
+        - name: notificationId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Delivery status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryStatus'
+        '404':
+          description: Notification not found
+
+  /recovery/suggest:
+    post:
+      summary: Get recovery suggestions
+      description: Suggest recovery actions when a court deadline is missed.
+      operationId: suggestRecovery
+      tags: [Recovery]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, caseId, missedAction]
+              properties:
+                userId:
+                  type: string
+                caseId:
+                  type: string
+                missedAction:
+                  type: string
+                jurisdiction:
+                  type: string
+      responses:
+        '200':
+          description: Recovery suggestions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecoverySuggestion'
+
+components:
+  schemas:
+    SendNotificationInput:
+      type: object
+      required: [userId, channel, template, data]
+      properties:
+        userId:
+          type: string
+        channel:
+          type: string
+          enum: [sms, email, push, in-app]
+        template:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        urgency:
+          type: string
+          enum: [critical, high, medium, low]
+        eventType:
+          type: string
+          enum: [hearing-scheduled, hearing-rescheduled, hearing-cancelled, deadline-approaching, filing-received, case-update, payment-due, document-available]
+        caseId:
+          type: string
+
+    NotificationResult:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pending, queued, sent, delivered, failed]
+        channel:
+          type: string
+        urgency:
+          type: string
+        sentAt:
+          type: string
+          format: date-time
+
+    ScheduledNotification:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        channel:
+          type: string
+        template:
+          type: string
+        scheduledFor:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, sent, cancelled]
+
+    EscalationChainInput:
+      type: object
+      required: [notificationId, userId, steps]
+      properties:
+        notificationId:
+          type: string
+        userId:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              channel:
+                type: string
+                enum: [sms, email, push, in-app]
+              delayMinutes:
+                type: integer
+              urgency:
+                type: string
+
+    EscalationChain:
+      type: object
+      properties:
+        id:
+          type: string
+        notificationId:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+        status:
+          type: string
+          enum: [active, acknowledged, completed, cancelled]
+
+    DeliveryStatus:
+      type: object
+      properties:
+        notificationId:
+          type: string
+        status:
+          type: string
+          enum: [pending, queued, sent, delivered, opened, acknowledged, failed, bounced]
+        channel:
+          type: string
+        sentAt:
+          type: string
+          format: date-time
+        deliveredAt:
+          type: string
+          format: date-time
+        openedAt:
+          type: string
+          format: date-time
+
+    RecoverySuggestion:
+      type: object
+      properties:
+        action:
+          type: string
+        urgency:
+          type: string
+          enum: [critical, high, medium, low]
+        description:
+          type: string
+        deadline:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - BearerAuth: []
